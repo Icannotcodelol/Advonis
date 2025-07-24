@@ -5,9 +5,9 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'LexChecker - German Contract Analysis',
+  title: 'Advonis - German Contract Analysis',
   description: 'AI-powered analysis of German contracts for legal compliance and risk assessment',
-  keywords: ['legal tech', 'contract analysis', 'German law', 'BGB', 'compliance'],
+  keywords: ['legal tech', 'contract analysis', 'German law', 'BGB', 'compliance', 'Advonis'],
 }
 
 export default function RootLayout({
@@ -24,7 +24,7 @@ export default function RootLayout({
               <div className="flex justify-between items-center h-16">
                 <div className="flex items-center">
                   <h1 className="text-2xl font-bold text-primary-700">
-                    LexChecker
+                    Advonis
                   </h1>
                   <span className="ml-2 text-sm text-gray-500">
                     German Contract Analysis
@@ -46,7 +46,7 @@ export default function RootLayout({
           <footer className="bg-white border-t mt-auto">
             <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
               <p className="text-center text-sm text-gray-500">
-                © 2024 LexChecker. Für die Analyse deutscher Verträge entwickelt.
+                © 2025 Advonis. Für die Analyse deutscher Verträge entwickelt.
               </p>
             </div>
           </footer>
