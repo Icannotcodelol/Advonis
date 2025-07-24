@@ -49,6 +49,21 @@ export interface Annotation {
   suggestedReplacement?: string;
   legalReference?: string;
   confidence: number;
+  
+  // Enhanced fields for hybrid annotation system
+  sourceType: AnnotationSourceType;
+  textEvidence?: string[]; // For structural inferences: contributing clause references
+  recommendedHighlight?: string; // Approximate text to highlight for structural issues
+  contributingFactors?: ContributingFactor[]; // For complex structural issues
+}
+
+export interface ContributingFactor {
+  clauseReference: string; // e.g., "§2 Arbeitszeit"
+  factorText: string; // The actual problematic text
+  severity: AnnotationSeverity;
+  startOffset?: number;
+  endOffset?: number;
+  explanation: string;
 }
 
 export type ContractType = 
@@ -81,6 +96,17 @@ export type AnnotationSeverity =
   | 'medium'
   | 'low'
   | 'info';
+
+export type AnnotationSourceType = 
+  | 'specific_text'        // Direct problematic clause
+  | 'structural_inference' // Legal conclusion from overall contract structure
+  | 'missing_clause';      // Required clause that's absent
+
+export type HighlightStyle = 
+  | 'direct_violation'     // Red solid underline - exact problematic text
+  | 'contributing_factor'  // Yellow dotted border - contributes to structural issue
+  | 'related_section'      // Blue dashed outline - relevant but not directly problematic
+  | 'missing_reference';   // Gray background - where missing clause should be
 
 export interface AnalysisResult {
   contractId: string;

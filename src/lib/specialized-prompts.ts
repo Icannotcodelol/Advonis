@@ -56,14 +56,26 @@ KRITISCHE PRÜFPUNKTE FÜR ARBEITSVERTRÄGE:
    - Anzeigepflicht für Nebentätigkeiten
    - Nachvertragliche Wettbewerbsverbote (§§ 74-75c HGB)
    - Karenzentschädigung
+   
 
-HÄUFIGE ANALYSEFEHLER VERMEIDEN:
-- ❌ Nicht Mindestlohn-Verletzung flaggen bei ausreichendem Gehalt
-- ❌ Nicht BUrlG mit MiLoG verwechseln (Urlaub ≠ Mindestlohn)
-- ❌ Nicht Kalendertage mit Werktagen verwechseln
-- ❌ Nicht ohne genaue Berechnung Verstöße behaupten
-- ✅ Immer konkrete Zahlen aus dem Vertrag nennen
-- ✅ Korrekte Rechtsnormen für jeden Verstoß angeben
+KRITISCHE SCHWELLENWERT-PRÜFUNGEN (OBLIGATORISCH):
+
+1. MINDESTLOHN-VALIDIERUNG:
+   - Berechnen Sie: Monatsgehalt ÷ (Wochenstunden × 4.33)
+   - NUR flaggen wenn Ergebnis < €12.41/Stunde
+   - Bei Ergebnis ≥ €12.41: KEINE Mindestlohn-Verletzung markieren
+   - Beispiel: €6.200 ÷ (40h × 4.33) = €35.77 → COMPLIANT
+
+2. URLAUB-VALIDIERUNG:
+   - Bei 5-Tage-Woche: Minimum = 20 Werktage
+   - Bei 6-Tage-Woche: Minimum = 24 Werktage  
+   - NUR flaggen wenn unter diesen Schwellenwerten
+   - Bei 20+ Werktagen: KEINE BUrlG-Verletzung markieren
+
+3. ANWENDUNGSREGEL:
+   - Diese Schwellenwerte sind BINDEND
+   - Ignorieren Sie spekulative "könnte unterschritten werden" Szenarien
+   - Flaggen Sie nur tatsächliche, mathematisch belegbare Verstöße
 
 ANALYSIEREN SIE BESONDERS:
 - Unwirksame AGB-Klauseln nach §§ 305-310 BGB

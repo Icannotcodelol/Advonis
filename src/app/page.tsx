@@ -4,50 +4,38 @@ import { useState } from 'react'
 import { UploadArea } from '@/components/upload-area'
 import { DocumentViewer } from '@/components/document-viewer'
 import { ContractAnalysis } from '@/components/contract-analysis'
-import { parsePDFFile } from '@/lib/pdf-parser'
-
-interface MinimalContract {
-  name: string;
-  content: string;
-  pages: string[];
-  annotations?: any[];
-}
 
 export default function HomePage() {
-  const [contract, setContract] = useState<MinimalContract | null>(null)
+  const [contract, setContract] = useState<any | null>(null)
   const [analysis, setAnalysis] = useState<any | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
 
-  const handleContractUpload = async (file: File) => {
-    setIsAnalyzing(true)
-    setAnalysis(null)
+  const handleContractUpload = async (contractObj: any) => {
+    setIsAnalyzing(true);
+    setAnalysis(null);
     try {
-      // Parse PDF file to extract content and pages
-      const { content, pages } = await parsePDFFile(file)
-      const minimalContract: MinimalContract = {
-        name: file.name,
-        content,
-        pages,
-      }
-      setContract(minimalContract)
-
+      setContract(contractObj);
       // Send to analysis API
       const response = await fetch('/api/analyze-contract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content, pages, name: file.name }),
-      })
-      if (!response.ok) throw new Error('Contract analysis failed')
-      const { analysis: analysisResult } = await response.json()
-      setAnalysis(analysisResult)
-      setContract({ ...minimalContract, annotations: analysisResult.annotations })
+        body: JSON.stringify({
+          content: contractObj.content,
+          pages: contractObj.pages.map((page: any) => page.content),
+          name: contractObj.name
+        }),
+      });
+      if (!response.ok) throw new Error('Contract analysis failed');
+      const { analysis: analysisResult } = await response.json();
+      setAnalysis(analysisResult);
+      setContract({ ...contractObj, annotations: analysisResult.annotations });
     } catch (error) {
-      console.error('Contract processing failed:', error)
-      setContract(null)
+      console.error('Contract processing failed:', error);
+      setContract(null);
     } finally {
-      setIsAnalyzing(false)
+      setIsAnalyzing(false);
     }
-  }
+  };
 
   const handleReset = () => {
     setContract(null)

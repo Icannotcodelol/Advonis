@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { CheckCircle, AlertTriangle, TrendingUp, Shield, Download } from 'lucide-react'
+import { StructuralIssueCard } from './structural-issue-card'
 
 interface MinimalContract {
   name: string;
@@ -110,29 +111,44 @@ export function ContractAnalysis({ contract, analysis, isAnalyzing }: ContractAn
   );
 
   const renderAnnotations = () => {
-    // Better categorization: check both type and content for missing clauses
-    const presentIssues = annotations.filter((a: any) => {
-      const isMissingType = a.type === 'missing_clause';
+    // Categorize annotations by sourceType for better display
+    const specificTextIssues = annotations.filter((a: any) => 
+      (a.sourceType || 'specific_text') === 'specific_text'
+    );
+    
+    const structuralInferences = annotations.filter((a: any) => 
+      a.sourceType === 'structural_inference'
+    );
+    
+    const missingClauses = annotations.filter((a: any) => 
+      a.sourceType === 'missing_clause' || a.type === 'missing_clause'
+    );
+    
+    // Legacy fallback for annotations without sourceType
+    const legacyIssues = annotations.filter((a: any) => {
+      if (a.sourceType) return false; // Skip if already categorized
+      
       const isMissingContent = a.comment?.toLowerCase().includes('fehlend') || 
                                a.comment?.toLowerCase().includes('fehlt') ||
                                a.comment?.toLowerCase().includes('missing') ||
                                a.explanation?.toLowerCase().includes('fehlend') ||
                                a.explanation?.toLowerCase().includes('fehlt');
-      return !isMissingType && !isMissingContent;
+      return !isMissingContent;
     });
     
-    const missingIssues = annotations.filter((a: any) => {
-      const isMissingType = a.type === 'missing_clause';
+    const legacyMissing = annotations.filter((a: any) => {
+      if (a.sourceType) return false; // Skip if already categorized
+      
       const isMissingContent = a.comment?.toLowerCase().includes('fehlend') || 
                                a.comment?.toLowerCase().includes('fehlt') ||
                                a.comment?.toLowerCase().includes('missing') ||
                                a.explanation?.toLowerCase().includes('fehlend') ||
                                a.explanation?.toLowerCase().includes('fehlt');
-      return isMissingType || isMissingContent;
+      return isMissingContent;
     });
 
     return (
-      <div className="space-y-4">
+      <div className="space-y-6">
         {totalCount === 0 ? (
           <div className="text-center py-8 text-gray-500">
             <CheckCircle className="w-12 h-12 mx-auto mb-2 text-green-500" />
@@ -140,15 +156,37 @@ export function ContractAnalysis({ contract, analysis, isAnalyzing }: ContractAn
           </div>
         ) : (
           <>
-            {/* Present Issues */}
-            {presentIssues.length > 0 && (
+            {/* Structural Legal Inferences */}
+            {structuralInferences.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
+                  <Shield className="w-4 h-4 mr-2" />
+                  Legal Risk Assessment ({structuralInferences.length})
+                </h4>
+                <div className="space-y-4">
+                  {structuralInferences.map((annotation: any) => (
+                    <StructuralIssueCard 
+                      key={annotation.id} 
+                      annotation={annotation}
+                      onHighlightFactor={(factor) => {
+                        // Could emit event to highlight specific factor in document
+                        console.log('Highlight factor:', factor);
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Specific Text Issues */}
+            {(specificTextIssues.length > 0 || legacyIssues.length > 0) && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
                   <AlertTriangle className="w-4 h-4 mr-2" />
-                  Issues Found in Contract ({presentIssues.length})
+                  Issues Found in Contract ({specificTextIssues.length + legacyIssues.length})
                 </h4>
                 <div className="space-y-3">
-                  {presentIssues.map((annotation: any) => (
+                  {[...specificTextIssues, ...legacyIssues].map((annotation: any) => (
                     <div key={annotation.id} className="bg-white border rounded-lg p-4">
                       <div className="flex items-start justify-between mb-2">
                         <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${getRiskBadgeColor(annotation.severity)}`}>
@@ -176,14 +214,14 @@ export function ContractAnalysis({ contract, analysis, isAnalyzing }: ContractAn
             )}
 
             {/* Missing Clauses */}
-            {missingIssues.length > 0 && (
+            {(missingClauses.length > 0 || legacyMissing.length > 0) && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
                   <AlertTriangle className="w-4 h-4 mr-2" />
-                  Missing Required Clauses ({missingIssues.length})
+                  Missing Required Clauses ({missingClauses.length + legacyMissing.length})
                 </h4>
                 <div className="space-y-3">
-                  {missingIssues.map((annotation: any) => (
+                  {[...missingClauses, ...legacyMissing].map((annotation: any) => (
                     <div key={annotation.id} className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                       <div className="flex items-start justify-between mb-2">
                         <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${getRiskBadgeColor(annotation.severity)}`}>

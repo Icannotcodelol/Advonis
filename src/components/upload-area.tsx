@@ -3,8 +3,10 @@
 import { useState, useCallback } from 'react'
 import { Upload, AlertCircle } from 'lucide-react'
 
+import type { ContractDocument } from '../types/contract';
+
 interface UploadAreaProps {
-  onContractUpload: (file: File) => void
+  onContractUpload: (contract: ContractDocument & { sections?: any[] }) => void;
 }
 
 export function UploadArea({ onContractUpload }: UploadAreaProps) {
@@ -32,12 +34,16 @@ export function UploadArea({ onContractUpload }: UploadAreaProps) {
     setIsProcessing(true)
     setError(null)
     try {
-      onContractUpload(file)
+      // Dynamically import PDFParser and use parseFileWithStructure
+      const { PDFParser } = await import('../lib/pdf-parser');
+      const parser = PDFParser.getInstance();
+      const contract = await parser.parseFileWithStructure(file);
+      onContractUpload(contract);
     } catch (err) {
-      console.error('File processing error:', err)
-      setError('Failed to process file. Please ensure it is a readable PDF or Word document.')
+      console.error('File processing error:', err);
+      setError('Failed to process file. Please ensure it is a readable PDF or Word document.');
     } finally {
-      setIsProcessing(false)
+      setIsProcessing(false);
     }
   }
 

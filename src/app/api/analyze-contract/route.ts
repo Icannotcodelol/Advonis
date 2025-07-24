@@ -21,10 +21,21 @@ WICHTIG: Antworten Sie AUSSCHLIESSLICH im folgenden JSON-Format:
       "id": "unique_id",
       "type": "legal_risk|compliance_issue|improvement_suggestion|missing_clause|gdpr_concern",
       "severity": "critical|high|medium|low|info",
+      "sourceType": "specific_text|structural_inference|missing_clause",
       "comment": "Präzise Beschreibung des Problems (max. 100 Zeichen)",
       "explanation": "Detaillierte rechtliche Erklärung mit Begründung (min. 50 Zeichen)",
       "legalReference": "Relevante Gesetze/Paragraphen (z.B. § 622 BGB, § 2 NachwG)",
       "text": "Relevanter Vertragstext oder Problembereich",
+      "textEvidence": ["§2 Arbeitszeit", "§5 Weisungsbefugnis"], // Nur bei structural_inference
+      "recommendedHighlight": "Ungefährer Text zum Hervorheben", // Nur bei structural_inference
+      "contributingFactors": [ // Nur bei komplexen structural_inference Problemen
+        {
+          "clauseReference": "§2 Arbeitszeit",
+          "factorText": "Feste Arbeitszeiten 9-17 Uhr",
+          "severity": "high",
+          "explanation": "Deutet auf abhängige Beschäftigung hin"
+        }
+      ],
       "suggestedReplacement": "Vorgeschlagene Verbesserung (optional)",
       "pageNumber": 1,
       "confidence": 0.9
@@ -41,6 +52,48 @@ WICHTIG: Antworten Sie AUSSCHLIESSLICH im folgenden JSON-Format:
   ]
 }
 
+ANNOTATION SOURCE TYPES:
+- "specific_text": Problem liegt in konkretem Vertragstext (z.B. unwirksame AGB-Klausel)
+- "structural_inference": Rechtliche Schlussfolgerung aus Gesamtvertrag (z.B. Scheinselbständigkeit)
+- "missing_clause": Fehlende erforderliche Bestimmung
+
+FÜR STRUCTURAL_INFERENCE:
+- textEvidence: Liste der beitragenden Vertragsabsätze/Klauseln
+- recommendedHighlight: Konkreter Text der hervorgehoben werden sollte
+- contributingFactors: Bei komplexen Problemen wie Scheinselbständigkeit alle Faktoren auflisten
+
+BEISPIEL für Scheinselbständigkeit:
+{
+  "sourceType": "structural_inference",
+  "textEvidence": ["§2 Arbeitszeit", "§4 Weisungen", "§6 Vergütung"],
+  "contributingFactors": [
+    {"clauseReference": "§2", "factorText": "Arbeitszeit: täglich 8 Stunden", "severity": "high"},
+    {"clauseReference": "§4", "factorText": "Weisungsrecht des Auftraggebers", "severity": "critical"}
+  ]
+}
+
+BEISPIELE für mathematische Validierung:
+
+RICHTIG - Mindestlohn COMPLIANCE (KEINE Flaggung):
+- Vertrag: €4.500/Monat bei 168h → €26,79/h > €12,41 → KEIN Verstoß
+- Vertrag: €2.500/Monat bei 160h → €15,63/h > €12,41 → KEIN Verstoß
+
+RICHTIG - Mindestlohn VERSTOS (Flaggung erforderlich):
+- Vertrag: €1.800/Monat bei 168h → €10,71/h < €12,41 → Verstoß flaggen
+
+FALSCH - Diese Flaggung ist VERBOTEN:
+- "Trotz €26,79/h könnte Mindestlohn-Risiko bestehen" → NIEMALS so flaggen!
+
+ALLGEMEINE VALIDIERUNGSREGEL:
+Für JEDEN Compliance-Check gilt:
+1. MESSEN Sie den tatsächlichen Wert im Vertrag
+2. VERGLEICHEN Sie mit dem gesetzlichen Schwellenwert  
+3. NUR bei tatsächlicher Unterschreitung → Verstoß flaggen
+4. Bei Einhaltung oder Überschreitung → KEINE Flaggung
+5. DOKUMENTIEREN Sie die Berechnung transparent
+
+Diese Regel gilt für: Mindestlohn, Kündigungsfristen, Urlaubstage, Arbeitszeiten, etc.
+
 ANALYSESCHWERPUNKTE:
 - BGB-Compliance (§§ 305-310 AGB-Recht, § 307 Unwirksamkeit)
 - Arbeitsrecht (§ 622 BGB Kündigungsfristen, § 2 NachwG Pflichtangaben)
@@ -48,6 +101,21 @@ ANALYSESCHWERPUNKTE:
 - Urlaubsrecht (BUrlG § 3: mind. 24 Werktage)
 - DSGVO-Compliance bei Datenverarbeitung
 - Scheinselbständigkeit nach § 611a BGB
+
+KRITISCH - MATHEMATISCHE VALIDIERUNG:
+Bei Mindestlohn-Prüfung:
+1. Berechnen Sie den Stundenlohn: (Monatslohn ÷ Arbeitsstunden pro Monat)
+2. Vergleichen Sie mit €12,41
+3. NUR bei Stundenlohn < €12,41 → Verstoß flaggen
+4. Bei Stundenlohn ≥ €12,41 → KEINEN Verstoß flaggen
+5. Dokumentieren Sie die Berechnung in der explanation
+
+Bei Urlaubstagen-Prüfung:
+1. Zählen Sie die gewährten Urlaubstage
+2. Vergleichen Sie mit 24 Werktagen (bei 6-Tage-Woche) oder 20 Werktagen (bei 5-Tage-Woche)
+3. NUR bei weniger Tagen → Verstoß flaggen
+
+NIEMALS einen Compliance-Verstoß flaggen, wenn die tatsächlichen Werte die gesetzlichen Mindestanforderungen erfüllen oder überschreiten.
 
 Jede Annotation MUSS eine detaillierte "explanation" und "legalReference" enthalten. Seien Sie spezifisch und actionable.`;
 
