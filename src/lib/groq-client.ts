@@ -174,8 +174,8 @@ Führen Sie eine vollständige rechtliche Analyse durch und identifizieren Sie a
         analysisDate: new Date(),
         overallRisk: parsed.overallRisk || 'medium',
         summary: parsed.summary || 'Analysis completed',
-        annotations,
-        recommendations,
+        annotations: this.deduplicateAnnotations(annotations),
+        recommendations: this.deduplicateRecommendations(recommendations),
         legalCompliance
       };
 
@@ -183,6 +183,171 @@ Führen Sie eine vollständige rechtliche Analyse durch und identifizieren Sie a
       console.error('Failed to parse AI response:', error);
       throw new Error('Invalid response format from AI analysis');
     }
+  }
+
+  // Advanced similarity detection using multiple algorithms
+  private calculateSimilarity(text1: string, text2: string): number {
+    if (!text1 || !text2) return 0;
+    
+    // Normalize texts
+    const norm1 = text1.toLowerCase().trim().replace(/\s+/g, ' ');
+    const norm2 = text2.toLowerCase().trim().replace(/\s+/g, ' ');
+    
+    if (norm1 === norm2) return 1;
+    
+    // Levenshtein distance similarity
+    const levenshteinSim = 1 - (this.levenshteinDistance(norm1, norm2) / Math.max(norm1.length, norm2.length));
+    
+    // Keyword overlap similarity
+    const words1 = new Set(norm1.split(/\s+/).filter(w => w.length > 3));
+    const words2 = new Set(norm2.split(/\s+/).filter(w => w.length > 3));
+    const intersection = new Set(Array.from(words1).filter(x => words2.has(x)));
+    const union = new Set([...Array.from(words1), ...Array.from(words2)]);
+    const keywordSim = union.size > 0 ? intersection.size / union.size : 0;
+    
+    // Combined similarity (weighted average)
+    return (levenshteinSim * 0.6) + (keywordSim * 0.4);
+  }
+
+  private levenshteinDistance(str1: string, str2: string): number {
+    const matrix = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null));
+    
+    for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
+    for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
+    
+    for (let j = 1; j <= str2.length; j++) {
+      for (let i = 1; i <= str1.length; i++) {
+        const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+        matrix[j][i] = Math.min(
+          matrix[j][i - 1] + 1, // deletion
+          matrix[j - 1][i] + 1, // insertion
+          matrix[j - 1][i - 1] + indicator // substitution
+        );
+      }
+    }
+    
+    return matrix[str2.length][str1.length];
+  }
+
+  private advancedDeduplication(annotations: Annotation[]): Annotation[] {
+    const result: Annotation[] = [];
+    const processed = new Set<string>();
+    
+    for (let i = 0; i < annotations.length; i++) {
+      if (processed.has(annotations[i].id)) continue;
+      
+      const current = annotations[i];
+      const similar: Annotation[] = [current];
+      processed.add(current.id);
+      
+      // Find similar annotations
+      for (let j = i + 1; j < annotations.length; j++) {
+        if (processed.has(annotations[j].id)) continue;
+        
+        const candidate = annotations[j];
+        
+        // Check if they're similar
+        const textSim = this.calculateSimilarity(current.text || '', candidate.text || '');
+        const explanationSim = this.calculateSimilarity(current.explanation || '', candidate.explanation || '');
+        const sameLegalRef = current.legalReference === candidate.legalReference && current.legalReference;
+        
+        if ((textSim > 0.7 || explanationSim > 0.7) && sameLegalRef) {
+          similar.push(candidate);
+          processed.add(candidate.id);
+        }
+      }
+      
+      // Merge similar annotations
+      if (similar.length > 1) {
+        const merged = this.mergeAnnotations(similar);
+        result.push(merged);
+      } else {
+        result.push(current);
+      }
+    }
+    
+    return result;
+  }
+
+  private mergeAnnotations(annotations: Annotation[]): Annotation {
+    const primary = annotations[0];
+    const allTexts = annotations.map(a => a.text || '').filter(t => t.length > 0);
+    const allExplanations = annotations.map(a => a.explanation || '').filter(e => e.length > 0);
+    
+    // Use the longest/most detailed text and explanation
+    const bestText = allTexts.reduce((a, b) => a.length > b.length ? a : b, '');
+    const bestExplanation = allExplanations.reduce((a, b) => a.length > b.length ? a : b, '');
+    
+    return {
+      ...primary,
+      text: bestText,
+      explanation: bestExplanation,
+      comment: primary.comment + (annotations.length > 1 ? ` (${annotations.length} related issues merged)` : ''),
+    };
+  }
+
+  // Update the main deduplication to use both methods
+  private deduplicateAnnotations(annotations: Annotation[]): Annotation[] {
+    // First pass: basic deduplication
+    const basicDeduped = this.basicDeduplication(annotations);
+    
+    // Second pass: advanced similarity detection
+    const finalDeduped = this.advancedDeduplication(basicDeduped);
+    
+    return finalDeduped;
+  }
+
+  private basicDeduplication(annotations: Annotation[]): Annotation[] {
+    const deduplicated: Annotation[] = [];
+    const seen = new Set<string>();
+
+    for (const annotation of annotations) {
+      // Create a deduplication key based on text content, legal reference, and explanation similarity
+      const normalizedText = annotation.text?.toLowerCase().trim().replace(/\s+/g, ' ') || '';
+      const normalizedExplanation = annotation.explanation?.toLowerCase().trim().replace(/\s+/g, ' ') || '';
+      const legalRef = annotation.legalReference || '';
+      
+      // Create a hash of the key components
+      const dedupKey = `${normalizedText.substring(0, 100)}-${legalRef}-${normalizedExplanation.substring(0, 100)}`;
+      
+      // Check for similar existing annotations
+      let isDuplicate = false;
+      for (const existingKey of Array.from(seen)) {
+        // Check if this is a duplicate based on text similarity and same legal reference
+        if (existingKey.includes(legalRef) && legalRef && 
+            (existingKey.includes(normalizedText.substring(0, 50)) || 
+             normalizedText.includes(existingKey.split('-')[0].substring(0, 50)))) {
+          isDuplicate = true;
+          break;
+        }
+      }
+
+      if (!isDuplicate) {
+        seen.add(dedupKey);
+        deduplicated.push(annotation);
+      }
+    }
+
+    return deduplicated;
+  }
+
+  private deduplicateRecommendations(recommendations: Recommendation[]): Recommendation[] {
+    const deduplicated: Recommendation[] = [];
+    const seen = new Set<string>();
+
+    for (const rec of recommendations) {
+      const normalizedTitle = rec.title?.toLowerCase().trim().replace(/\s+/g, ' ') || '';
+      const normalizedDesc = rec.description?.toLowerCase().trim().replace(/\s+/g, ' ') || '';
+      
+      const dedupKey = `${normalizedTitle.substring(0, 50)}-${normalizedDesc.substring(0, 100)}`;
+      
+      if (!seen.has(dedupKey)) {
+        seen.add(dedupKey);
+        deduplicated.push(rec);
+      }
+    }
+
+    return deduplicated;
   }
 
   private findTextOffset(content: string, text: string): number {

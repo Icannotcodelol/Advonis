@@ -2,6 +2,6 @@
   "/not-found": "app/not-found.js",
   "/page": "app/page.js",
   "/api/classify-contract/route": "app/api/classify-contract/route.js",
-  "/api/analyze-contract/route": "app/api/analyze-contract/route.js",
-  "/api/parse-document/route": "app/api/parse-document/route.js"
+  "/api/parse-document/route": "app/api/parse-document/route.js",
+  "/api/analyze-contract/route": "app/api/analyze-contract/route.js"
 }

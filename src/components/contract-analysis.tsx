@@ -13,6 +13,7 @@ interface ContractAnalysisProps {
 
 function ContractAnalysis({ contract, analysis, classification, isAnalyzing }: ContractAnalysisProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'annotations' | 'recommendations' | 'compliance' | 'classification'>('overview')
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
 
   // Robustly extract risk and annotations
   const risk = analysis?.overallRisk || 'Unknown';
@@ -199,6 +200,149 @@ function ContractAnalysis({ contract, analysis, classification, isAnalyzing }: C
     </div>
   )
 
+  // Group annotations by legal reference and similar issues
+  const groupAnnotationsByLegalRef = (annotations: any[]) => {
+    const groups: { [key: string]: any[] } = {};
+    const ungrouped: any[] = [];
+
+    annotations.forEach(annotation => {
+      const legalRef = annotation.legalReference;
+      if (legalRef) {
+        if (!groups[legalRef]) {
+          groups[legalRef] = [];
+        }
+        groups[legalRef].push(annotation);
+      } else {
+        ungrouped.push(annotation);
+      }
+    });
+
+    return { groups, ungrouped };
+  };
+
+  const renderGroupedAnnotations = (annotations: any[], title: string, colorClass: string) => {
+    if (annotations.length === 0) return null;
+
+    const { groups, ungrouped } = groupAnnotationsByLegalRef(annotations);
+
+    const toggleGroup = (legalRef: string) => {
+      const newExpanded = new Set(expandedGroups);
+      if (newExpanded.has(legalRef)) {
+        newExpanded.delete(legalRef);
+      } else {
+        newExpanded.add(legalRef);
+      }
+      setExpandedGroups(newExpanded);
+    };
+
+    return (
+      <div>
+        <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
+          <div className={`w-4 h-4 mr-2 ${colorClass} rounded-full`} />
+          {title} ({annotations.length})
+        </h4>
+        <div className="space-y-3">
+          {/* Grouped annotations */}
+          {Object.entries(groups).map(([legalRef, groupAnnotations]) => {
+            const isExpanded = expandedGroups.has(legalRef);
+            const primaryAnnotation = groupAnnotations[0];
+            const hasMultiple = groupAnnotations.length > 1;
+
+            return (
+              <div key={legalRef} className="bg-white border rounded-lg">
+                <div 
+                  className={`p-4 ${hasMultiple ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                  onClick={() => hasMultiple && toggleGroup(legalRef)}
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${getRiskBadgeColor(primaryAnnotation.severity)}`}>
+                        {primaryAnnotation.severity ? primaryAnnotation.severity.charAt(0).toUpperCase() + primaryAnnotation.severity.slice(1) : 'Issue'}
+                      </div>
+                      {hasMultiple && (
+                        <span className="inline-flex items-center px-2 py-1 rounded text-xs bg-blue-100 text-blue-800">
+                          {groupAnnotations.length} related issues
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">
+                        Page {primaryAnnotation.pageNumber || 1}
+                      </span>
+                      {hasMultiple && (
+                        <button className="text-gray-400 hover:text-gray-600">
+                          {isExpanded ? '−' : '+'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <h5 className="font-medium text-gray-900 mb-1">
+                    {primaryAnnotation.comment || primaryAnnotation.text}
+                  </h5>
+                  <p className="text-sm text-gray-700 mb-2">
+                    {primaryAnnotation.explanation || 'No detailed explanation provided.'}
+                  </p>
+                  <div className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">
+                    {legalRef}
+                  </div>
+                </div>
+                
+                {/* Expanded additional annotations */}
+                {isExpanded && hasMultiple && (
+                  <div className="border-t bg-gray-50">
+                    {groupAnnotations.slice(1).map((annotation, index) => (
+                      <div key={annotation.id} className="p-4 border-b last:border-b-0">
+                        <div className="flex items-start justify-between mb-2">
+                          <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${getRiskBadgeColor(annotation.severity)}`}>
+                            {annotation.severity ? annotation.severity.charAt(0).toUpperCase() + annotation.severity.slice(1) : 'Issue'}
+                          </div>
+                          <span className="text-xs text-gray-500">
+                            Page {annotation.pageNumber || 1}
+                          </span>
+                        </div>
+                        <h6 className="font-medium text-gray-800 mb-1">
+                          {annotation.comment || annotation.text}
+                        </h6>
+                        <p className="text-sm text-gray-600">
+                          {annotation.explanation || 'No detailed explanation provided.'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Ungrouped annotations */}
+          {ungrouped.map((annotation) => (
+            <div key={annotation.id} className="bg-white border rounded-lg p-4">
+              <div className="flex items-start justify-between mb-2">
+                <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${getRiskBadgeColor(annotation.severity)}`}>
+                  {annotation.severity ? annotation.severity.charAt(0).toUpperCase() + annotation.severity.slice(1) : 'Issue'}
+                </div>
+                <span className="text-xs text-gray-500">
+                  Page {annotation.pageNumber || 1}
+                </span>
+              </div>
+              <h5 className="font-medium text-gray-900 mb-1">
+                {annotation.comment || annotation.text}
+              </h5>
+              <p className="text-sm text-gray-700 mb-2">
+                {annotation.explanation || 'No detailed explanation provided.'}
+              </p>
+              {annotation.legalReference && (
+                <div className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">
+                  {annotation.legalReference}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const renderAnnotations = () => {
     // Categorize annotations by sourceType for better display
     const specificTextIssues = annotations.filter((a: any) => 
@@ -270,66 +414,18 @@ function ContractAnalysis({ contract, analysis, classification, isAnalyzing }: C
               </div>
             )}
 
-            {/* Specific Text Issues */}
-            {(specificTextIssues.length > 0 || legacyIssues.length > 0) && (
-              <div>
-                <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
-                  <div className="w-4 h-4 mr-2 bg-red-500 rounded-full" />
-                  Issues Found in Contract ({specificTextIssues.length + legacyIssues.length})
-                </h4>
-                <div className="space-y-3">
-                  {[...specificTextIssues, ...legacyIssues].map((annotation: any) => (
-                    <div key={annotation.id} className="bg-white border rounded-lg p-4">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${getRiskBadgeColor(annotation.severity)}`}>
-                          {annotation.severity ? annotation.severity.charAt(0).toUpperCase() + annotation.severity.slice(1) : 'Issue'}
-                        </div>
-                        <span className="text-xs text-gray-500">
-                          Page {annotation.pageNumber || 1}
-                        </span>
-                      </div>
-                      <h5 className="font-medium text-gray-900 mb-1">
-                        {annotation.comment || annotation.text}
-                      </h5>
-                      <p className="text-sm text-gray-700 mb-2">
-                        {annotation.explanation || 'No detailed explanation provided.'}
-                      </p>
-                      {annotation.legalReference && (
-                        <div className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">
-                          {annotation.legalReference}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {/* Specific Text Issues - Grouped */}
+            {renderGroupedAnnotations(
+              [...specificTextIssues, ...legacyIssues],
+              'Issues Found in Contract',
+              'bg-red-500'
             )}
 
-            {/* Missing Clauses */}
-            {(missingClauses.length > 0 || legacyMissing.length > 0) && (
-              <div>
-                <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
-                  <div className="w-4 h-4 mr-2 bg-yellow-500 rounded-full" />
-                  Missing Required Clauses ({missingClauses.length + legacyMissing.length})
-                </h4>
-                <div className="space-y-3">
-                  {[...missingClauses, ...legacyMissing].map((annotation: any) => (
-                    <div key={annotation.id} className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${getRiskBadgeColor(annotation.severity)}`}>
-                          {annotation.severity ? annotation.severity.charAt(0).toUpperCase() + annotation.severity.slice(1) : 'Missing'}
-                        </div>
-                      </div>
-                      <h5 className="font-medium text-gray-900 mb-1">
-                        {annotation.comment || annotation.text}
-                      </h5>
-                      <p className="text-sm text-gray-700">
-                        {annotation.explanation || 'This clause should be added to ensure legal compliance.'}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {/* Missing Clauses - Grouped */}
+            {renderGroupedAnnotations(
+              [...missingClauses, ...legacyMissing],
+              'Missing Required Clauses',
+              'bg-yellow-500'
             )}
           </>
         )}
