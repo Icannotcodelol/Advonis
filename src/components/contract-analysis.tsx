@@ -1,26 +1,21 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle, AlertTriangle, TrendingUp, Shield, Download } from 'lucide-react'
-import { StructuralIssueCard } from './structural-issue-card'
-
-interface MinimalContract {
-  name: string;
-  pages: string[];
-  annotations?: any[];
-}
+import type { ContractDocument, AnalysisResult, ContractClassificationResult } from '@/types/contract'
+import StructuralIssueCard from './structural-issue-card'
 
 interface ContractAnalysisProps {
-  contract: MinimalContract
-  analysis: any | null
+  contract: ContractDocument | null
+  analysis: AnalysisResult | null
+  classification: ContractClassificationResult | null
   isAnalyzing: boolean
 }
 
-export function ContractAnalysis({ contract, analysis, isAnalyzing }: ContractAnalysisProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'annotations' | 'recommendations' | 'compliance'>('overview')
+function ContractAnalysis({ contract, analysis, classification, isAnalyzing }: ContractAnalysisProps) {
+  const [activeTab, setActiveTab] = useState<'overview' | 'annotations' | 'recommendations' | 'compliance' | 'classification'>('overview')
 
   // Robustly extract risk and annotations
-  const risk = analysis?.overallRisk || analysis?.gesamtbeurteilung?.risiko || 'Unknown';
+  const risk = analysis?.overallRisk || 'Unknown';
   const annotations = Array.isArray(analysis?.annotations) ? analysis.annotations : [];
 
   // Robust severity counting
@@ -38,77 +33,171 @@ export function ContractAnalysis({ contract, analysis, isAnalyzing }: ContractAn
     return 'bg-gray-100 text-gray-800 border-gray-200';
   };
 
+  const getConfidenceBadgeColor = (confidence: number) => {
+    if (confidence >= 0.8) return 'bg-green-100 text-green-800';
+    if (confidence >= 0.6) return 'bg-yellow-100 text-yellow-800';
+    return 'bg-red-100 text-red-800';
+  };
+
+  if (isAnalyzing) {
+    return (
+      <div className="bg-white rounded-lg shadow-sm p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+          <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+          <div className="space-y-2">
+            <div className="h-3 bg-gray-200 rounded"></div>
+            <div className="h-3 bg-gray-200 rounded w-5/6"></div>
+          </div>
+        </div>
+        <p className="text-sm text-gray-500 mt-4">
+          Analyzing contract with AI-powered legal expertise...
+        </p>
+      </div>
+    );
+  }
+
+  if (!contract) {
+    return (
+      <div className="bg-white rounded-lg shadow-sm p-6 text-center text-gray-500">
+        Upload a contract to start analysis
+      </div>
+    );
+  }
+
   const renderOverview = () => (
     <div className="space-y-6">
+      {/* Contract Classification */}
+      {classification && (
+        <div className="bg-blue-50 rounded-lg p-4">
+          <h4 className="font-semibold text-gray-900 mb-3">Contract Classification</h4>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-600">Primary Type:</span>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  {classification.primaryType}
+                </span>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getConfidenceBadgeColor(classification.confidence)}`}>
+                  {Math.round(classification.confidence * 100)}%
+                </span>
+              </div>
+            </div>
+            
+            {classification.secondaryTypes.length > 0 && (
+              <div>
+                <span className="text-sm text-gray-600">Secondary Types:</span>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {classification.secondaryTypes.map((secondary, index) => (
+                    <span key={index} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700">
+                      {secondary.type} ({Math.round(secondary.confidence * 100)}%)
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {classification.isCompoundContract && (
+              <div className="text-sm text-amber-700 bg-amber-50 rounded p-2">
+                ⚠️ Compound Contract: Contains elements of multiple contract types
+              </div>
+            )}
+            
+            {classification.riskFactors.length > 0 && (
+              <div>
+                <span className="text-sm font-medium text-red-600">Risk Factors:</span>
+                <ul className="text-xs text-red-700 mt-1 space-y-1">
+                  {classification.riskFactors.map((factor, index) => (
+                    <li key={index} className="flex items-start gap-1">
+                      <span className="text-red-400">•</span>
+                      <span>{factor}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Risk Assessment */}
-      <div className="bg-white border rounded-lg p-4">
-        <h4 className="text-lg font-semibold mb-3 flex items-center">
-          <Shield className="w-5 h-5 mr-2 text-gray-600" />
-          Risk Assessment
-        </h4>
-        <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${getRiskBadgeColor(risk)}`}>
-          <TrendingUp className="w-4 h-4 mr-1" />
-          {typeof risk === 'string' ? risk.charAt(0).toUpperCase() + risk.slice(1) : 'Unknown'} Risk
+      <div className="bg-gray-50 rounded-lg p-4">
+        <h4 className="font-semibold text-gray-900 mb-3">Risk Assessment</h4>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-sm text-gray-600">Overall Risk Level</span>
+          <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getRiskBadgeColor(risk)}`}>
+            {risk}
+          </span>
         </div>
-        {analysis?.summary && (
-          <p className="mt-3 text-gray-700 leading-relaxed">{analysis.summary}</p>
-        )}
-        {analysis?.gesamtbeurteilung?.hinweis && (
-          <p className="mt-3 text-gray-700 leading-relaxed">{analysis.gesamtbeurteilung.hinweis}</p>
-        )}
-      </div>
-      {/* Issue Summary */}
-      <div className="bg-white border rounded-lg p-4">
-        <h4 className="text-lg font-semibold mb-3">Issue Summary</h4>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="text-center p-3 bg-red-50 rounded-lg">
-            <div className="text-2xl font-bold text-red-600">{criticalCount}</div>
-            <div className="text-sm text-red-700">Critical & High</div>
+        
+        <div className="grid grid-cols-3 gap-4 text-center">
+          <div>
+            <div className="text-lg font-bold text-red-600">{criticalCount}</div>
+            <div className="text-xs text-gray-500">Critical</div>
           </div>
-          <div className="text-center p-3 bg-yellow-50 rounded-lg">
-            <div className="text-2xl font-bold text-yellow-600">{mediumCount}</div>
-            <div className="text-sm text-yellow-700">Medium Risk</div>
+          <div>
+            <div className="text-lg font-bold text-yellow-600">{mediumCount}</div>
+            <div className="text-xs text-gray-500">Medium</div>
           </div>
-          <div className="text-center p-3 bg-blue-50 rounded-lg">
-            <div className="text-2xl font-bold text-blue-600">{lowCount}</div>
-            <div className="text-sm text-blue-700">Low & Info</div>
-          </div>
-          <div className="text-center p-3 bg-green-50 rounded-lg">
-            <div className="text-2xl font-bold text-green-600">{totalCount}</div>
-            <div className="text-sm text-green-700">Total Issues</div>
+          <div>
+            <div className="text-lg font-bold text-blue-600">{lowCount}</div>
+            <div className="text-xs text-gray-500">Low</div>
           </div>
         </div>
       </div>
-      {/* Contract Info */}
-      <div className="bg-white border rounded-lg p-4">
-        <h4 className="text-lg font-semibold mb-3">Contract Information</h4>
-        <dl className="space-y-2">
-          <div className="flex justify-between">
-            <dt className="text-sm text-gray-600">Pages:</dt>
-            <dd className="text-sm font-medium">{contract.pages.length}</dd>
+
+      {/* Summary */}
+      {analysis?.summary && (
+        <div className="bg-gray-50 rounded-lg p-4">
+          <h4 className="font-semibold text-gray-900 mb-2">Analysis Summary</h4>
+          <p className="text-sm text-gray-700">{analysis.summary}</p>
+        </div>
+      )}
+
+      {/* Structural Indicators */}
+      {classification?.structuralIndicators && (
+        <div className="bg-gray-50 rounded-lg p-4">
+          <h4 className="font-semibold text-gray-900 mb-3">Contract Structure</h4>
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div className="flex justify-between">
+              <span>Deliverables:</span>
+              <span className={classification.structuralIndicators.hasDeliverables ? 'text-green-600' : 'text-gray-400'}>
+                {classification.structuralIndicators.hasDeliverables ? '✓' : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Time-based:</span>
+              <span className={classification.structuralIndicators.hasTimeBasedPayment ? 'text-green-600' : 'text-gray-400'}>
+                {classification.structuralIndicators.hasTimeBasedPayment ? '✓' : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Success Metrics:</span>
+              <span className={classification.structuralIndicators.hasSuccessMetrics ? 'text-green-600' : 'text-gray-400'}>
+                {classification.structuralIndicators.hasSuccessMetrics ? '✓' : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Employment Terms:</span>
+              <span className={classification.structuralIndicators.hasEmploymentTerms ? 'text-green-600' : 'text-gray-400'}>
+                {classification.structuralIndicators.hasEmploymentTerms ? '✓' : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Confidentiality:</span>
+              <span className={classification.structuralIndicators.hasConfidentialityTerms ? 'text-green-600' : 'text-gray-400'}>
+                {classification.structuralIndicators.hasConfidentialityTerms ? '✓' : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Clauses:</span>
+              <span className="text-gray-600">{classification.structuralIndicators.clauseCount}</span>
+            </div>
           </div>
-        </dl>
-      </div>
-      {/* Document Completeness */}
-      <div className="bg-white border rounded-lg p-4">
-        <h4 className="text-lg font-semibold mb-3 flex items-center">
-          <svg className="w-5 h-5 mr-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-3-3v6m5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          Document Completeness
-        </h4>
-        <p className="text-sm text-gray-700">
-          The contract analysis indicates that {totalCount} legal issues were identified across {contract.pages.length} pages.
-          This coverage is {totalCount === 0 ? 'excellent' : 'satisfactory'}.
-        </p>
-        {analysis?.gesamtbeurteilung?.dokumentkomplettität && (
-          <div className="mt-3 text-sm text-gray-700">
-            <strong>Document Completeness Rating:</strong> {analysis.gesamtbeurteilung.dokumentkomplettität}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
-  );
+  )
 
   const renderAnnotations = () => {
     // Categorize annotations by sourceType for better display
@@ -151,7 +240,6 @@ export function ContractAnalysis({ contract, analysis, isAnalyzing }: ContractAn
       <div className="space-y-6">
         {totalCount === 0 ? (
           <div className="text-center py-8 text-gray-500">
-            <CheckCircle className="w-12 h-12 mx-auto mb-2 text-green-500" />
             <p>No legal issues found in this contract!</p>
           </div>
         ) : (
@@ -160,18 +248,22 @@ export function ContractAnalysis({ contract, analysis, isAnalyzing }: ContractAn
             {structuralInferences.length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
-                  <Shield className="w-4 h-4 mr-2" />
+                  <div className="w-4 h-4 mr-2 bg-blue-500 rounded-full" />
                   Legal Risk Assessment ({structuralInferences.length})
                 </h4>
                 <div className="space-y-4">
                   {structuralInferences.map((annotation: any) => (
-                    <StructuralIssueCard 
-                      key={annotation.id} 
-                      annotation={annotation}
-                      onHighlightFactor={(factor) => {
-                        // Could emit event to highlight specific factor in document
-                        console.log('Highlight factor:', factor);
-                      }}
+                    <StructuralIssueCard
+                      key={annotation.id}
+                      title={annotation.comment || annotation.text || 'Legal Risk'}
+                      description={annotation.explanation || 'No detailed explanation provided.'}
+                      severity={
+                        (annotation.severity || '').toLowerCase().includes('high') || (annotation.severity || '').toLowerCase().includes('kritisch')
+                          ? 'error'
+                          : (annotation.severity || '').toLowerCase().includes('medium') || (annotation.severity || '').toLowerCase().includes('mittel')
+                          ? 'warning'
+                          : 'info'
+                      }
                     />
                   ))}
                 </div>
@@ -182,7 +274,7 @@ export function ContractAnalysis({ contract, analysis, isAnalyzing }: ContractAn
             {(specificTextIssues.length > 0 || legacyIssues.length > 0) && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
-                  <AlertTriangle className="w-4 h-4 mr-2" />
+                  <div className="w-4 h-4 mr-2 bg-red-500 rounded-full" />
                   Issues Found in Contract ({specificTextIssues.length + legacyIssues.length})
                 </h4>
                 <div className="space-y-3">
@@ -217,7 +309,7 @@ export function ContractAnalysis({ contract, analysis, isAnalyzing }: ContractAn
             {(missingClauses.length > 0 || legacyMissing.length > 0) && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center">
-                  <AlertTriangle className="w-4 h-4 mr-2" />
+                  <div className="w-4 h-4 mr-2 bg-yellow-500 rounded-full" />
                   Missing Required Clauses ({missingClauses.length + legacyMissing.length})
                 </h4>
                 <div className="space-y-3">
@@ -227,21 +319,13 @@ export function ContractAnalysis({ contract, analysis, isAnalyzing }: ContractAn
                         <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${getRiskBadgeColor(annotation.severity)}`}>
                           {annotation.severity ? annotation.severity.charAt(0).toUpperCase() + annotation.severity.slice(1) : 'Missing'}
                         </div>
-                        <span className="text-xs text-gray-500">
-                          Required by Law
-                        </span>
                       </div>
                       <h5 className="font-medium text-gray-900 mb-1">
                         {annotation.comment || annotation.text}
                       </h5>
-                      <p className="text-sm text-gray-700 mb-2">
-                        {annotation.explanation || 'This clause is required but missing from the contract.'}
+                      <p className="text-sm text-gray-700">
+                        {annotation.explanation || 'This clause should be added to ensure legal compliance.'}
                       </p>
-                      {annotation.legalReference && (
-                        <div className="text-xs text-gray-600 bg-yellow-100 px-2 py-1 rounded">
-                          Legal Basis: {annotation.legalReference}
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -253,174 +337,246 @@ export function ContractAnalysis({ contract, analysis, isAnalyzing }: ContractAn
     );
   };
 
-  const renderRecommendations = () => (
-    <div className="space-y-3">
-      {(!analysis?.recommendations || analysis.recommendations.length === 0) && !analysis?.empfehlungen ? (
+  const renderRecommendations = () => {
+    const recommendations = analysis?.recommendations || [];
+    
+    if (recommendations.length === 0) {
+      return (
         <div className="text-center py-8 text-gray-500">
-          <p>No specific recommendations at this time.</p>
+          <p>No specific recommendations available</p>
         </div>
-      ) : (
-        (analysis.recommendations || []).map((rec: any, index: number) => (
-          <div key={index} className="bg-white border rounded-lg p-4">
-            <div className="flex items-start justify-between mb-2">
-              <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-                rec.priority === 'high' ? 'bg-red-100 text-red-800' :
-                rec.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                'bg-blue-100 text-blue-800'
-              }`}>
-                {rec.priority ? rec.priority.charAt(0).toUpperCase() + rec.priority.slice(1) : 'Recommendation'} Priority
-              </div>
-              {rec.actionRequired && (
-                <span className="text-xs text-orange-600 font-medium">
-                  Action Required
-                </span>
-              )}
-            </div>
-            <h5 className="font-medium text-gray-900 mb-1">
-              {rec.title}
-            </h5>
-            <p className="text-sm text-gray-700">
-              {rec.description}
-            </p>
-            {rec.category && (
-              <div className="mt-2 text-xs text-gray-600">
-                Category: {rec.category}
-              </div>
-            )}
-          </div>
-        ))
-      )}
-      {/* Show additional recommendations from 'empfehlungen' if present */}
-      {analysis?.empfehlungen?.sofortige_anpassungen && analysis.empfehlungen.sofortige_anpassungen.map((rec: any, idx: number) => (
-        <div key={`sofort_${idx}`} className="bg-white border rounded-lg p-4">
-          <div className="flex items-start justify-between mb-2">
-            <div className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-800">Sofortige Anpassung</div>
-          </div>
-          <h5 className="font-medium text-gray-900 mb-1">{rec.punkt}</h5>
-          <p className="text-sm text-gray-700 mb-2">{rec.empfehlung}</p>
-          {rec.beispiel && <div className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">Beispiel: {rec.beispiel}</div>}
-        </div>
-      ))}
-      {analysis?.empfehlungen?.ergänzende_klauseln && analysis.empfehlungen.ergänzende_klauseln.map((rec: any, idx: number) => (
-        <div key={`klausel_${idx}`} className="bg-white border rounded-lg p-4">
-          <div className="flex items-start justify-between mb-2">
-            <div className="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">Ergänzende Klausel</div>
-          </div>
-          <h5 className="font-medium text-gray-900 mb-1">{rec.bereich}</h5>
-          <p className="text-sm text-gray-700 mb-2">{rec.empfehlung}</p>
-        </div>
-      ))}
-    </div>
-  );
+      );
+    }
 
-  const renderCompliance = () => (
-    <div className="space-y-3">
-      {(!analysis?.legalCompliance || analysis.legalCompliance.length === 0) && !analysis?.gesamtbeurteilung ? (
+    return (
+      <div className="space-y-4">
+        {recommendations.map((rec: any, index: number) => (
+          <div key={index} className="border rounded-lg p-4 hover:shadow-sm transition-shadow">
+            <div className="flex items-start gap-3">
+              <div className={`w-5 h-5 mt-0.5 rounded-full ${
+                rec.priority === 'high' ? 'bg-red-500' : 
+                rec.priority === 'medium' ? 'bg-yellow-500' : 
+                'bg-blue-500'
+              }`} />
+              <div className="flex-1">
+                <h5 className="font-medium text-gray-900">
+                  {rec.title || `Recommendation ${index + 1}`}
+                </h5>
+                <p className="text-sm text-gray-600 mt-1">
+                  {rec.description || 'No description provided'}
+                </p>
+                {rec.category && (
+                  <span className="inline-block mt-2 px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs">
+                    {rec.category}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderCompliance = () => {
+    const compliance = analysis?.legalCompliance || [];
+    
+    if (compliance.length === 0) {
+      return (
         <div className="text-center py-8 text-gray-500">
-          <p>No compliance information available.</p>
+          <p>No compliance information available</p>
         </div>
-      ) : (
-        (analysis.legalCompliance || []).map((compliance: any, index: number) => (
-          <div key={index} className="bg-white border rounded-lg p-4">
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {compliance.map((comp: any, index: number) => (
+          <div key={index} className="border rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
               <h5 className="font-medium text-gray-900">
-                {compliance.law} {compliance.section}
+                {comp.law} {comp.section}
               </h5>
-              <div className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
-                compliance.status === 'compliant' ? 'bg-green-100 text-green-800' :
-                compliance.status === 'non_compliant' ? 'bg-red-100 text-red-800' :
+              <span className={`px-2 py-1 rounded text-xs font-medium ${
+                comp.status === 'compliant' ? 'bg-green-100 text-green-800' :
+                comp.status === 'non_compliant' ? 'bg-red-100 text-red-800' :
                 'bg-yellow-100 text-yellow-800'
               }`}>
-                {compliance.status === 'compliant' ? 'Compliant' :
-                 compliance.status === 'non_compliant' ? 'Non-Compliant' :
+                {comp.status === 'compliant' ? 'Compliant' :
+                 comp.status === 'non_compliant' ? 'Non-Compliant' :
                  'Unclear'}
+              </span>
+            </div>
+            <p className="text-sm text-gray-600">
+              {comp.description}
+            </p>
+            {comp.recommendation && (
+              <p className="text-sm text-blue-600 mt-2">
+                <strong>Recommendation:</strong> {comp.recommendation}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderClassificationDetails = () => {
+    if (!classification) {
+      return (
+        <div className="text-center py-8 text-gray-500">
+          <p>No classification information available</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        <div className="bg-white border rounded-lg p-4">
+          <h4 className="font-semibold text-gray-900 mb-3">Classification Summary</h4>
+          <p className="text-sm text-gray-700 mb-4">{classification.reasoning}</p>
+          
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-600">Primary Type:</span>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  {classification.primaryType}
+                </span>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getConfidenceBadgeColor(classification.confidence)}`}>
+                  {Math.round(classification.confidence * 100)}%
+                </span>
               </div>
             </div>
-            <p className="text-sm text-gray-700 mb-2">
-              {compliance.description}
-            </p>
-            {compliance.recommendation && (
-              <div className="text-sm text-blue-700 bg-blue-50 p-2 rounded">
-                <strong>Recommendation:</strong> {compliance.recommendation}
+            
+            {classification.secondaryTypes.length > 0 && (
+              <div>
+                <span className="text-sm text-gray-600">Secondary Types:</span>
+                <div className="space-y-2 mt-2">
+                  {classification.secondaryTypes.map((secondary, index) => (
+                    <div key={index} className="flex items-center justify-between bg-gray-50 rounded p-2">
+                      <span className="text-sm text-gray-800">{secondary.type}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getConfidenceBadgeColor(secondary.confidence)}`}>
+                          {Math.round(secondary.confidence * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {classification.isCompoundContract && (
+              <div className="text-sm text-amber-700 bg-amber-50 rounded p-3">
+                ⚠️ <strong>Compound Contract:</strong> This contract contains elements of multiple contract types, requiring careful legal review.
+              </div>
+            )}
+            
+            {classification.riskFactors.length > 0 && (
+              <div>
+                <span className="text-sm font-medium text-red-600">Risk Factors:</span>
+                <ul className="text-sm text-red-700 mt-2 space-y-1">
+                  {classification.riskFactors.map((factor, index) => (
+                    <li key={index} className="flex items-start gap-2 bg-red-50 rounded p-2">
+                      <span className="text-red-400 mt-1">•</span>
+                      <span>{factor}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>
-        ))
-      )}
-      {/* Show additional compliance info from 'gesamtbeurteilung' if present */}
-      {analysis?.gesamtbeurteilung && (
-        <div className="bg-white border rounded-lg p-4 mt-2">
-          <h5 className="font-medium text-gray-900 mb-1">Gesamtbeurteilung</h5>
-          <p className="text-sm text-gray-700 mb-2">{analysis.gesamtbeurteilung.rechtskonformität}</p>
-          <p className="text-sm text-gray-700 mb-2">Risikobewertung: {analysis.gesamtbeurteilung.risikobewertung}</p>
-          <p className="text-sm text-gray-700 mb-2">Dringlichkeit: {analysis.gesamtbeurteilung.dringlichkeit}</p>
-          {analysis.gesamtbeurteilung.hinweis && <div className="text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded">{analysis.gesamtbeurteilung.hinweis}</div>}
         </div>
-      )}
-    </div>
-  );
+
+        {/* Structural Analysis */}
+        {classification.structuralIndicators && (
+          <div className="bg-white border rounded-lg p-4">
+            <h4 className="font-semibold text-gray-900 mb-3">Structural Analysis</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                <span className="text-sm text-gray-600">Deliverables:</span>
+                <span className={`font-medium ${classification.structuralIndicators.hasDeliverables ? 'text-green-600' : 'text-gray-400'}`}>
+                  {classification.structuralIndicators.hasDeliverables ? '✓ Yes' : '— No'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                <span className="text-sm text-gray-600">Time-based Payment:</span>
+                <span className={`font-medium ${classification.structuralIndicators.hasTimeBasedPayment ? 'text-green-600' : 'text-gray-400'}`}>
+                  {classification.structuralIndicators.hasTimeBasedPayment ? '✓ Yes' : '— No'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                <span className="text-sm text-gray-600">Success Metrics:</span>
+                <span className={`font-medium ${classification.structuralIndicators.hasSuccessMetrics ? 'text-green-600' : 'text-gray-400'}`}>
+                  {classification.structuralIndicators.hasSuccessMetrics ? '✓ Yes' : '— No'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                <span className="text-sm text-gray-600">Employment Terms:</span>
+                <span className={`font-medium ${classification.structuralIndicators.hasEmploymentTerms ? 'text-green-600' : 'text-gray-400'}`}>
+                  {classification.structuralIndicators.hasEmploymentTerms ? '✓ Yes' : '— No'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                <span className="text-sm text-gray-600">Confidentiality:</span>
+                <span className={`font-medium ${classification.structuralIndicators.hasConfidentialityTerms ? 'text-green-600' : 'text-gray-400'}`}>
+                  {classification.structuralIndicators.hasConfidentialityTerms ? '✓ Yes' : '— No'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                <span className="text-sm text-gray-600">Total Clauses:</span>
+                <span className="font-medium text-gray-600">{classification.structuralIndicators.clauseCount}</span>
+              </div>
+              <div className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                <span className="text-sm text-gray-600">Contract Length:</span>
+                <span className="font-medium text-gray-600 capitalize">{classification.structuralIndicators.contractLength}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border h-full flex flex-col">
-      {/* Header */}
-      <div className="p-4 border-b">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">
-            Analysis Results
-          </h3>
-          {analysis && (
-            <button className="text-sm text-gray-600 hover:text-gray-800 flex items-center">
-              <Download className="w-4 h-4 mr-1" />
-              Export
+    <div className="bg-white rounded-lg shadow-sm">
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8 px-6 pt-6">
+          {[
+            { key: 'overview', label: 'Overview' },
+            { key: 'annotations', label: `Issues (${totalCount})` },
+            { key: 'recommendations', label: 'Recommendations' },
+            { key: 'compliance', label: 'Compliance' },
+            ...(classification ? [{ key: 'classification', label: 'Classification' }] : [])
+          ].map(tab => (
+            <button
+              key={tab.key}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === tab.key
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-200'
+              }`}
+              onClick={() => setActiveTab(tab.key as any)}
+            >
+              {tab.label}
             </button>
-          )}
-        </div>
+          ))}
+        </nav>
       </div>
-      {/* Loading State */}
-      {isAnalyzing && (
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin w-8 h-8 border-4 border-primary-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-            <p className="text-gray-600">Analyzing contract...</p>
-            <p className="text-sm text-gray-500 mt-1">This may take a moment</p>
-          </div>
-        </div>
-      )}
-      {/* Content */}
-      {!isAnalyzing && (
-        <>
-          {/* Tabs */}
-          <div className="border-b">
-            <nav className="flex px-4">
-              {[
-                { id: 'overview', label: 'Overview', icon: null },
-                { id: 'annotations', label: 'Issues', icon: null },
-                { id: 'recommendations', label: 'Recommendations', icon: null },
-                { id: 'compliance', label: 'Compliance', icon: null }
-              ].map(({ id, label }) => (
-                <button
-                  key={id}
-                  onClick={() => setActiveTab(id as any)}
-                  className={`py-3 px-4 border-b-2 font-medium text-sm flex items-center flex-1 justify-center min-w-0 ${
-                    activeTab === id
-                      ? 'border-primary-500 text-primary-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-                >
-                  <span className="truncate">{label}</span>
-                </button>
-              ))}
-            </nav>
-          </div>
-          {/* Tab Content */}
-          <div className="flex-1 overflow-auto p-4">
-            {activeTab === 'overview' && renderOverview()}
-            {activeTab === 'annotations' && renderAnnotations()}
-            {activeTab === 'recommendations' && renderRecommendations()}
-            {activeTab === 'compliance' && renderCompliance()}
-          </div>
-        </>
-      )}
+
+      {/* Tab Content */}
+      <div className="p-6">
+        {activeTab === 'overview' && renderOverview()}
+        {activeTab === 'annotations' && renderAnnotations()}
+        {activeTab === 'recommendations' && renderRecommendations()}
+        {activeTab === 'compliance' && renderCompliance()}
+        {activeTab === 'classification' && renderClassificationDetails()}
+      </div>
     </div>
-  );
-} 
+  )
+}
+
+export default ContractAnalysis
+ 

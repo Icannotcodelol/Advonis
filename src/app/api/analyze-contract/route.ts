@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Groq from 'groq-sdk';
 import { SPECIALIZED_SYSTEM_PROMPTS } from '@/lib/specialized-prompts';
+import type { ContractClassificationResult } from '@/types/contract';
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -119,7 +120,129 @@ NIEMALS einen Compliance-Verstoß flaggen, wenn die tatsächlichen Werte die ges
 
 Jede Annotation MUSS eine detaillierte "explanation" und "legalReference" enthalten. Seien Sie spezifisch und actionable.`;
 
-function normalizeAnnotations(analysis: any): any[] {
+// Helper function to get specialized system prompt based on contract type
+function getSpecializedSystemPrompt(contractType: string): string {
+  const specializedPrompt = SPECIALIZED_SYSTEM_PROMPTS[contractType as keyof typeof SPECIALIZED_SYSTEM_PROMPTS];
+  
+  const jsonFormat = `
+
+WICHTIG: Antworten Sie NUR im folgenden JSON-Format:
+{
+  "overallRisk": "low|medium|high|critical",
+  "summary": "Kurze Zusammenfassung der wichtigsten Erkenntnisse",
+  "annotations": [
+    {
+      "type": "legal_risk|compliance_issue|improvement_suggestion|language_clarity|missing_clause|gdpr_concern",
+      "severity": "critical|high|medium|low|info",
+      "text": "Der zu analysierende Textabschnitt",
+      "comment": "Kurze Erklärung des Problems",
+      "explanation": "Detaillierte rechtliche Begründung",
+      "suggestedReplacement": "Vorgeschlagener Ersatztext (optional)",
+      "legalReference": "Rechtsbezug (z.B. § 307 BGB)",
+      "confidence": 0.95
+    }
+  ],
+  "recommendations": [
+    {
+      "title": "Empfehlungstitel",
+      "description": "Beschreibung der Empfehlung",
+      "priority": "high|medium|low",
+      "category": "Kategorie",
+      "actionRequired": true|false
+    }
+  ],
+  "compliance": [
+    {
+      "law": "BGB",
+      "section": "§ 307",
+      "status": "compliant|non_compliant|unclear",
+      "description": "Beschreibung der Compliance",
+      "recommendation": "Empfehlung bei Nicht-Compliance"
+    }
+  ]
+}`;
+
+  return specializedPrompt ? specializedPrompt + jsonFormat : SYSTEM_PROMPT;
+}
+
+// Helper function to find text in content with better matching
+function findTextOffset(content: string, searchText: string): { startOffset: number; endOffset: number } {
+  if (!searchText || !content) {
+    return { startOffset: 0, endOffset: 0 };
+  }
+  
+  // Try exact match first
+  let index = content.indexOf(searchText);
+  if (index >= 0) {
+    return { startOffset: index, endOffset: index + searchText.length };
+  }
+  
+  // Try case-insensitive match
+  const lowerContent = content.toLowerCase();
+  const lowerSearch = searchText.toLowerCase();
+  index = lowerContent.indexOf(lowerSearch);
+  if (index >= 0) {
+    return { startOffset: index, endOffset: index + searchText.length };
+  }
+  
+  // Try partial match (first 20 characters)
+  const partial = searchText.substring(0, Math.min(20, searchText.length));
+  index = lowerContent.indexOf(partial.toLowerCase());
+  if (index >= 0) {
+    return { startOffset: index, endOffset: index + partial.length };
+  }
+  
+  // Try word-based matching (split by spaces and find first word)
+  const words = searchText.split(/\s+/).filter(w => w.length > 3);
+  for (const word of words) {
+    index = lowerContent.indexOf(word.toLowerCase());
+    if (index >= 0) {
+      return { startOffset: index, endOffset: index + word.length };
+    }
+  }
+  
+  return { startOffset: 0, endOffset: 0 };
+}
+
+// Post-process annotations to ensure they have valid offsets
+function computeAnnotationOffsets(annotations: any[], content: string): any[] {
+  return annotations.map(annotation => {
+    // Skip if already has valid offsets
+    if (annotation.startOffset > 0 && annotation.endOffset > annotation.startOffset) {
+      return annotation;
+    }
+    
+    // Try to find text in different fields
+    const searchTexts = [
+      annotation.text,
+      annotation.recommendedHighlight,
+      annotation.factorText,
+      ...(annotation.textEvidence || []),
+      ...(annotation.contributingFactors?.map((f: any) => f.factorText) || [])
+    ].filter(Boolean);
+    
+    for (const searchText of searchTexts) {
+      const { startOffset, endOffset } = findTextOffset(content, searchText);
+      if (startOffset > 0 || endOffset > 0) {
+        return {
+          ...annotation,
+          startOffset,
+          endOffset,
+          text: searchText // Use the text that was actually found
+        };
+      }
+    }
+    
+    // For missing clauses or structural inferences, don't highlight
+    if (annotation.sourceType === 'missing_clause' || annotation.type === 'missing_clause') {
+      return { ...annotation, startOffset: 0, endOffset: 0 };
+    }
+    
+    return annotation;
+  });
+}
+
+function normalizeAnnotations(analysis: any, content: string): any[] {
   const annotations: any[] = [];
   
   // If already present, return as is
@@ -130,15 +253,17 @@ function normalizeAnnotations(analysis: any): any[] {
   // Map vertragsanalyse.kritische_hinweise (newest structure)
   if (analysis.vertragsanalyse?.kritische_hinweise && Array.isArray(analysis.vertragsanalyse.kritische_hinweise)) {
     analysis.vertragsanalyse.kritische_hinweise.forEach((hint: string, i: number) => {
+      const text = hint.substring(0, 30) + '...';
+      const { startOffset, endOffset } = findTextOffset(content, text);
       annotations.push({
         id: `kritisch_hinweis_${i}`,
         type: 'legal_risk',
         severity: 'high',
         comment: 'Kritischer Hinweis',
         explanation: hint,
-        text: hint.substring(0, 30) + '...',
-        startOffset: i * 100,
-        endOffset: (i * 100) + 30,
+        text,
+        startOffset,
+        endOffset,
         pageNumber: 1,
         confidence: 0.9,
       });
@@ -148,6 +273,8 @@ function normalizeAnnotations(analysis: any): any[] {
   // Map rechtliche_einordnung issues
   if (analysis.rechtliche_einordnung?.abgrenzung_arbeitsvertrag) {
     const ab = analysis.rechtliche_einordnung.abgrenzung_arbeitsvertrag;
+    const abText = 'Freier Werkvertrag';
+    const { startOffset: abStart, endOffset: abEnd } = findTextOffset(content, abText);
     annotations.push({
       id: 'abgrenzung_arbeitsvertrag',
       type: 'legal_risk',
@@ -155,9 +282,9 @@ function normalizeAnnotations(analysis: any): any[] {
       comment: 'Abgrenzung Arbeitsvertrag',
       explanation: `${ab.problem}. ${ab.gefahr}`,
       legalReference: '§ 611a BGB, §§ 631-651 BGB',
-      text: 'Freier Werkvertrag',
-      startOffset: 0,
-      endOffset: 18,
+      text: abText,
+      startOffset: abStart,
+      endOffset: abEnd,
       pageNumber: 1,
       confidence: 0.9,
     });
@@ -187,6 +314,7 @@ function normalizeAnnotations(analysis: any): any[] {
   if (analysis.compliance_verstoesse) {
     Object.entries(analysis.compliance_verstoesse).forEach(([key, value]: [string, any], i: number) => {
       if (value && typeof value === 'object') {
+        const keyIdx = content.indexOf(key);
         annotations.push({
           id: `compliance_${key}_${i}`,
           type: 'compliance_issue',
@@ -194,8 +322,8 @@ function normalizeAnnotations(analysis: any): any[] {
           comment: `Compliance-Verstoß: ${key}`,
           explanation: `${value.status || ''}. ${value.problem || value.hinweis || ''}`,
           text: key,
-          startOffset: (i + 50) * 10,
-          endOffset: ((i + 50) * 10) + key.length,
+          startOffset: keyIdx >= 0 ? keyIdx : 0,
+          endOffset: keyIdx >= 0 ? keyIdx + key.length : 0,
           pageNumber: 1,
           confidence: 0.7,
         });
@@ -206,6 +334,8 @@ function normalizeAnnotations(analysis: any): any[] {
   // Map rechtliche_mängel (previous structure)
   if (analysis.rechtliche_mängel && Array.isArray(analysis.rechtliche_mängel)) {
     analysis.rechtliche_mängel.forEach((rm: any, i: number) => {
+      const rmText = rm.kategorie || rm.titel || 'Legal issue';
+      const { startOffset: rmStart, endOffset: rmEnd } = findTextOffset(content, rmText);
       annotations.push({
         id: `rechtlich_${i}`,
         type: 'legal_risk',
@@ -213,9 +343,9 @@ function normalizeAnnotations(analysis: any): any[] {
         comment: rm.kategorie || rm.beschreibung || rm.titel || 'Legal issue',
         explanation: rm.beschreibung || rm.erläuterung || rm.details || '',
         legalReference: rm.rechtsgrundlage || rm.gesetz || undefined,
-        text: rm.kategorie || rm.titel || 'Legal issue',
-        startOffset: i * 100,
-        endOffset: (i * 100) + 50,
+        text: rmText,
+        startOffset: rmStart,
+        endOffset: rmEnd,
         pageNumber: 1,
         confidence: 0.9,
       });
@@ -282,6 +412,8 @@ function normalizeAnnotations(analysis: any): any[] {
   // Map weitere_mängel (if present)
   if (analysis.weitere_mängel && Array.isArray(analysis.weitere_mängel)) {
     analysis.weitere_mängel.forEach((wm: any, i: number) => {
+      const wmText = wm.problem;
+      const { startOffset: wmStart, endOffset: wmEnd } = findTextOffset(content, wmText);
       annotations.push({
         id: `mangel_${i}`,
         type: 'improvement_suggestion',
@@ -290,9 +422,9 @@ function normalizeAnnotations(analysis: any): any[] {
         comment: wm.problem,
         explanation: wm.beschreibung,
         legalReference: wm.rechtsgrundlage,
-        text: wm.problem,
-        startOffset: (i + 10) * 100,
-        endOffset: ((i + 10) * 100) + 50,
+        text: wmText,
+        startOffset: wmStart,
+        endOffset: wmEnd,
         pageNumber: 1,
         confidence: 0.8,
       });
@@ -302,6 +434,8 @@ function normalizeAnnotations(analysis: any): any[] {
   // Map analyse_ergebnis.kritische_punkte (alternative structure)
   if (analysis.analyse_ergebnis?.kritische_punkte) {
     analysis.analyse_ergebnis.kritische_punkte.forEach((kp: any, i: number) => {
+      const kpText = kp.problem;
+      const { startOffset: kpStart, endOffset: kpEnd } = findTextOffset(content, kpText);
       annotations.push({
         id: `werk_kritisch_${i}`,
         type: 'legal_risk',
@@ -311,9 +445,9 @@ function normalizeAnnotations(analysis: any): any[] {
         explanation: kp.beschreibung,
         suggestedReplacement: kp.empfehlung,
         legalReference: kp.rechtsgrundlage,
-        text: kp.problem,
-        startOffset: (i + 20) * 100,
-        endOffset: ((i + 20) * 100) + 50,
+        text: kpText,
+        startOffset: kpStart,
+        endOffset: kpEnd,
         pageNumber: 1,
         confidence: 0.9,
       });
@@ -321,6 +455,45 @@ function normalizeAnnotations(analysis: any): any[] {
   }
 
   return annotations;
+}
+
+// Helper function to classify contract using the classification API
+async function classifyContract(content: string): Promise<ContractClassificationResult> {
+  try {
+    const response = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/classify-contract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Classification API returned ${response.status}`);
+    }
+
+    const { classification } = await response.json();
+    return classification;
+    
+  } catch (error) {
+    console.error('Failed to classify contract via API:', error);
+    // Fallback to 'general' if classification fails
+    return {
+      primaryType: 'general',
+      confidence: 0.5,
+      secondaryTypes: [],
+      reasoning: 'Classification API failed - using fallback',
+      structuralIndicators: {
+        hasDeliverables: false,
+        hasTimeBasedPayment: false,
+        hasSuccessMetrics: false,
+        hasEmploymentTerms: false,
+        hasConfidentialityTerms: false,
+        clauseCount: 0,
+        contractLength: 'medium'
+      },
+      isCompoundContract: false,
+      riskFactors: ['Classification failed - manual review recommended']
+    };
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -333,19 +506,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'AI analysis service not configured' }, { status: 500 });
     }
 
-    // Build focused user prompt
+    // Step 1: Classify the contract using the sophisticated classification API
+    const classification = await classifyContract(content);
+    
+    // Step 2: Use specialized system prompt based on classification
+    const systemPrompt = getSpecializedSystemPrompt(classification.primaryType);
+    
+    // Build focused user prompt with classification context
     const userPrompt = `Analysieren Sie den folgenden deutschen Vertrag:
 
 VERTRAGSNAME: ${name}
+KLASSIFIZIERT ALS: ${classification.primaryType} (Konfidenz: ${classification.confidence})
+KLASSIFIKATIONS-BEGRÜNDUNG: ${classification.reasoning}
+
+STRUKTURELLE INDIKATOREN:
+- Liefergegenstände: ${classification.structuralIndicators.hasDeliverables}
+- Zeitbasierte Zahlung: ${classification.structuralIndicators.hasTimeBasedPayment}
+- Erfolgsmetriken: ${classification.structuralIndicators.hasSuccessMetrics}
+- Arbeitsrechtliche Begriffe: ${classification.structuralIndicators.hasEmploymentTerms}
+- Geheimhaltung: ${classification.structuralIndicators.hasConfidentialityTerms}
+- Klauseln: ${classification.structuralIndicators.clauseCount}
+- Länge: ${classification.structuralIndicators.contractLength}
+
+${classification.riskFactors.length > 0 ? `RISIKOFAKTOREN: ${classification.riskFactors.join(', ')}` : ''}
+
 VERTRAGSINHALT:
 ${content}
 
-Führen Sie eine vollständige rechtliche Analyse durch. Identifizieren Sie ALLE problematischen Klauseln, fehlenden Bestimmungen und Compliance-Verstöße. Antworten Sie im geforderten JSON-Format.`;
+Führen Sie eine vollständige rechtliche Analyse durch. Berücksichtigen Sie die Klassifikation und strukturellen Indikatoren. Identifizieren Sie ALLE problematischen Klauseln, fehlenden Bestimmungen und Compliance-Verstöße. Antworten Sie im geforderten JSON-Format.`;
 
-    // Call GroqCloud with structured prompt
+    // Call GroqCloud with specialized prompt
     const completion = await groq.chat.completions.create({
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
       model: 'moonshotai/kimi-k2-instruct',
@@ -371,8 +564,11 @@ Führen Sie eine vollständige rechtliche Analyse durch. Identifizieren Sie ALLE
     // The structured prompt should provide annotations directly
     // But keep normalization as fallback for edge cases
     if (!analysis.annotations || analysis.annotations.length === 0) {
-      analysis.annotations = normalizeAnnotations(analysis);
+      analysis.annotations = normalizeAnnotations(analysis, content);
     }
+
+    // Post-process annotations to ensure they have valid offsets
+    analysis.annotations = computeAnnotationOffsets(analysis.annotations, content);
 
     // Ensure basic fields are present
     if (!analysis.overallRisk) {
@@ -383,7 +579,11 @@ Führen Sie eine vollständige rechtliche Analyse durch. Identifizieren Sie ALLE
       analysis.summary = `${analysis.annotations.length} rechtliche Probleme identifiziert.`;
     }
 
-    return NextResponse.json({ analysis });
+    // Include classification result in the response
+    return NextResponse.json({ 
+      analysis,
+      classification
+    });
   } catch (error) {
     console.error('Contract analysis error:', error);
     return NextResponse.json({ error: 'Failed to analyze contract' }, { status: 500 });

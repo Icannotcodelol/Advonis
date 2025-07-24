@@ -1,6 +1,6 @@
 // @ts-ignore: No types for mammoth
 import mammoth from 'mammoth';
-import type { ContractDocument, PDFPage, TextItem } from '@/types/contract';
+import type { ContractDocument } from '@/types/contract';
 
 export class WordParser {
   private static instance: WordParser;
@@ -23,12 +23,11 @@ export class WordParser {
       const { value: formattedContent } = await mammoth.convertToHtml({ arrayBuffer });
       
       const pages = this.splitIntoPages(content, formattedContent);
-      const contractType = this.detectContractType(content);
       
       return {
         id: this.generateId(),
         name: file.name,
-        type: contractType,
+        type: 'general', // Contract type will be determined by classification API
         content,
         formattedContent,
         pages,
@@ -42,53 +41,34 @@ export class WordParser {
     }
   }
 
-  private splitIntoPages(content: string, formattedContent: string): PDFPage[] {
-    // Word docs don't have pages, so treat as one page for now
-    return [{
+  private splitIntoPages(content: string, formattedContent: string) {
+    // Simple page splitting for Word documents
+    // Word documents don't have natural page breaks in the extracted text
+    const wordsPerPage = 500;
+    const words = content.split(/\s+/);
+    const pages = [];
+    
+    for (let i = 0; i < words.length; i += wordsPerPage) {
+      const pageWords = words.slice(i, i + wordsPerPage);
+      const pageContent = pageWords.join(' ');
+      
+      pages.push({
+        pageNumber: Math.floor(i / wordsPerPage) + 1,
+        content: pageContent,
+        textItems: [], // Word parsing doesn't provide detailed text items
+        viewport: { width: 612, height: 792 } // Standard letter size
+      });
+    }
+    
+    return pages.length > 0 ? pages : [{
       pageNumber: 1,
-      content: content.trim(),
-      textItems: this.extractTextItems(content),
-      viewport: { width: 0, height: 0 }
+      content,
+      textItems: [],
+      viewport: { width: 612, height: 792 }
     }];
   }
 
-  private extractTextItems(content: string): TextItem[] {
-    // Split by lines for basic structure
-    return content.split('\n').map(line => ({
-      str: line,
-      dir: 'ltr',
-      width: 0,
-      height: 0,
-      transform: [0, 0, 0, 0, 0, 0],
-      fontName: '',
-      hasEOL: true
-    }));
-  }
-
-  private detectContractType(content: string): ContractDocument['type'] {
-    // Simplified detection - AI will do the real classification
-    // Just do basic fallback detection for immediate UI feedback
-    const lowerContent = content.toLowerCase();
-    
-    if (lowerContent.includes('arbeitsvertrag') || lowerContent.includes('anstellungsvertrag')) {
-      return 'arbeitsvertrag';
-    }
-    if (lowerContent.includes('werkvertrag')) {
-      return 'werkvertrag';
-    }
-    if (lowerContent.includes('dienstvertrag') || lowerContent.includes('dienstleistung')) {
-      return 'dienstvertrag';
-    }
-    if (lowerContent.includes('geheimhaltung') || lowerContent.includes('nda')) {
-      return 'nda';
-    }
-    
-    return 'general'; // AI will provide accurate classification
-  }
-
-
-
   private generateId(): string {
-    return Math.random().toString(36).substr(2, 9);
+    return `contract_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 } 

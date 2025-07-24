@@ -1,34 +1,52 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Enable experimental features for better PDF handling
   experimental: {
-    serverActions: {
-      allowedOrigins: ["localhost:3000"]
-    }
+    serverComponentsExternalPackages: ['canvas', 'pdfjs-dist']
   },
+  
   webpack: (config, { isServer }) => {
-    // PDF.js configuration
+    // Exclude problematic modules from client-side bundling
     if (!isServer) {
-      config.resolve.alias = {
-        ...config.resolve.alias,
-        'pdfjs-dist/build/pdf.worker.entry': 'pdfjs-dist/build/pdf.worker.min.js',
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        canvas: false,
+        fs: false,
+        path: false,
+        os: false,
       };
       
-      // Ignore canvas on client side
-      config.resolve.alias.canvas = false;
+      // Ignore canvas and other node-specific modules in client builds
+      config.externals = config.externals || [];
+      config.externals.push({
+        canvas: 'canvas',
+        'pdfjs-dist/build/pdf.worker.min.js': 'pdfjs-dist/build/pdf.worker.min.js'
+      });
     }
-    
-    // Handle binary files and ignore canvas.node
-    config.module.rules.push({
-      test: /\.(woff|woff2|eot|ttf|otf)$/,
-      type: 'asset/resource',
-    });
-    
-    // Ignore canvas.node binary files
-    config.externals = config.externals || {};
-    config.externals.canvas = 'canvas';
+
+    // Handle PDF.js worker configuration
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      'pdfjs-dist/build/pdf.worker.min.js': require.resolve('pdfjs-dist/build/pdf.worker.min.js'),
+    };
 
     return config;
   },
-}
 
-module.exports = nextConfig 
+  // Ensure proper handling of static files
+  async headers() {
+    return [
+      {
+        source: '/pdf.worker.min.js',
+        headers: [
+          {
+            key: 'Content-Type',
+            value: 'application/javascript',
+          },
+        ],
+      },
+    ];
+  },
+};
+
+module.exports = nextConfig; 

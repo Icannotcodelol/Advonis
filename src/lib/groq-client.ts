@@ -1,5 +1,5 @@
 import Groq from 'groq-sdk';
-import { SPECIALIZED_SYSTEM_PROMPTS, CLASSIFICATION_PROMPT } from '@/lib/specialized-prompts';
+import { SPECIALIZED_SYSTEM_PROMPTS } from '@/lib/specialized-prompts';
 import type { 
   ContractDocument, 
   AnalysisResult, 
@@ -26,11 +26,12 @@ export class GroqAnalysisClient {
 
   async analyzeContract(contract: ContractDocument): Promise<AnalysisResult> {
     try {
-      // Step 1: Classify the contract type using AI
-      const classifiedType = await this.classifyContract(contract.content);
+      // Contract classification is now handled by the analysis API
+      // This method is kept for backward compatibility but should use the API endpoint
+      console.warn('GroqAnalysisClient.analyzeContract is deprecated. Use the /api/analyze-contract endpoint instead.');
       
-      // Step 2: Analyze the contract based on the classification
-      return await this.analyzeContractWithClassification(contract, classifiedType);
+      // Fallback to general analysis if called directly
+      return await this.analyzeContractWithClassification(contract, 'general');
     } catch (error) {
       console.error('AI analysis error:', error);
       throw new Error('Failed to analyze contract with AI');
@@ -64,42 +65,6 @@ export class GroqAnalysisClient {
     } catch (error) {
       console.error('AI contract analysis error:', error);
       throw new Error('Failed to analyze contract with AI');
-    }
-  }
-
-  async classifyContract(content: string): Promise<ContractDocument['type']> {
-    try {
-      // Use the specialized classification prompt
-      const fullPrompt = `${CLASSIFICATION_PROMPT}\n\n${content.substring(0, 2000)}...`;
-
-      const completion = await groq.chat.completions.create({
-        messages: [
-          { role: 'user', content: fullPrompt }
-        ],
-        model: 'moonshotai/kimi-k2-instruct',
-        temperature: 0.0,
-        max_tokens: 50,
-      });
-
-      const response = completion.choices[0]?.message?.content?.trim().toLowerCase();
-      
-      // Validate the response
-      const validTypes: ContractDocument['type'][] = [
-        'arbeitsvertrag', 'werkvertrag', 'dienstvertrag', 'nda', 
-        'service_agreement', 'purchase_agreement', 'rental_agreement', 'general'
-      ];
-      
-      if (response && validTypes.includes(response as ContractDocument['type'])) {
-        console.log(`Contract classified as: ${response}`);
-        return response as ContractDocument['type'];
-      }
-      
-      // Fallback to general if classification fails
-      console.log('Classification failed, defaulting to general');
-      return 'general';
-    } catch (error) {
-      console.error('Contract classification error:', error);
-      return 'general';
     }
   }
 
@@ -159,47 +124,50 @@ ${contract.content}
 Führen Sie eine vollständige rechtliche Analyse durch und identifizieren Sie alle problematischen Klauseln, Compliance-Verstöße und Verbesserungsmöglichkeiten.`;
   }
 
-  private parseAnalysisResponse(response: string, contract: ContractDocument, classifiedType: ContractDocument['type']): AnalysisResult {
+  private async parseAnalysisResponse(response: string, contract: ContractDocument, contractType: ContractDocument['type']): Promise<AnalysisResult> {
     try {
-      // Clean up the response to ensure valid JSON
+      // Clean the response
       let cleanResponse = response.trim();
       if (cleanResponse.startsWith('```json')) {
         cleanResponse = cleanResponse.replace(/```json\n?/, '').replace(/\n?```$/, '');
+      } else if (cleanResponse.startsWith('```')) {
+        cleanResponse = cleanResponse.replace(/```\n?/, '').replace(/\n?```$/, '');
       }
-      
+
       const parsed = JSON.parse(cleanResponse);
-      
-      // Validate and filter annotations to ensure they have valid text
-      const validAnnotations = (parsed.annotations || []).filter((ann: any) => {
-        return ann && 
-               typeof ann.text === 'string' && 
-               ann.text.trim().length > 0 &&
-               ann.type && 
-               ann.severity && 
-               ann.comment;
-      });
-      
-      // Transform annotations to include position data
-      const annotations: Annotation[] = validAnnotations.map((ann: any, index: number) => {
-        const annotationText = ann.text.trim();
-        const startOffset = this.findTextOffset(contract.content, annotationText);
-        
-        return {
-          id: `ann_${index}_${Date.now()}`,
-          type: ann.type as AnnotationType,
-          severity: ann.severity as AnnotationSeverity,
-          startOffset,
-          endOffset: startOffset + annotationText.length,
-          pageNumber: this.findPageNumber(contract, annotationText),
-          position: this.calculatePosition(contract, annotationText),
-          text: annotationText,
-          comment: ann.comment || 'No comment provided',
-          explanation: ann.explanation || ann.comment || 'No explanation provided',
-          suggestedReplacement: ann.suggestedReplacement || undefined,
-          legalReference: ann.legalReference || undefined,
-          confidence: Math.min(Math.max(ann.confidence || 0.8, 0), 1)
-        };
-      });
+
+      // Normalize the response structure
+      const annotations: Annotation[] = (parsed.annotations || []).map((ann: any, index: number) => ({
+        id: ann.id || `annotation_${index}`,
+        type: ann.type as AnnotationType,
+        severity: ann.severity as AnnotationSeverity,
+        text: ann.text || '',
+        comment: ann.comment || '',
+        explanation: ann.explanation || '',
+        legalReference: ann.legalReference || '',
+        suggestedReplacement: ann.suggestedReplacement,
+        confidence: ann.confidence || 0.8,
+        startOffset: this.findTextOffset(contract.content, ann.text),
+        endOffset: this.findTextOffset(contract.content, ann.text) + (ann.text?.length || 0),
+        pageNumber: ann.pageNumber || 1
+      }));
+
+      const recommendations: Recommendation[] = (parsed.recommendations || []).map((rec: any, index: number) => ({
+        id: `rec_${index}`,
+        title: rec.title || '',
+        description: rec.description || '',
+        priority: rec.priority || 'medium',
+        category: rec.category || 'General',
+        actionRequired: rec.actionRequired !== false
+      }));
+
+      const legalCompliance: ComplianceCheck[] = (parsed.compliance || []).map((comp: any) => ({
+        law: comp.law || '',
+        section: comp.section || '',
+        status: comp.status || 'unclear',
+        description: comp.description || '',
+        recommendation: comp.recommendation
+      }));
 
       return {
         contractId: contract.id,
@@ -207,98 +175,19 @@ Führen Sie eine vollständige rechtliche Analyse durch und identifizieren Sie a
         overallRisk: parsed.overallRisk || 'medium',
         summary: parsed.summary || 'Analysis completed',
         annotations,
-        recommendations: parsed.recommendations || [],
-        legalCompliance: parsed.compliance || []
+        recommendations,
+        legalCompliance
       };
+
     } catch (error) {
       console.error('Failed to parse AI response:', error);
-      console.error('Raw AI response:', response);
-      throw new Error('Invalid AI response format');
+      throw new Error('Invalid response format from AI analysis');
     }
   }
 
-  private findTextOffset(content: string, searchText: string): number {
-    // Add validation to prevent undefined/null errors
-    if (!content || !searchText || typeof content !== 'string' || typeof searchText !== 'string') {
-      return 0;
-    }
-    
-    const index = content.toLowerCase().indexOf(searchText.toLowerCase());
+  private findTextOffset(content: string, text: string): number {
+    if (!text) return 0;
+    const index = content.indexOf(text);
     return index >= 0 ? index : 0;
-  }
-
-  private findPageNumber(contract: ContractDocument, searchText: string): number {
-    // Add validation to prevent undefined/null errors
-    if (!contract?.pages || !searchText || typeof searchText !== 'string') {
-      return 1;
-    }
-    
-    for (let i = 0; i < contract.pages.length; i++) {
-      const pageContent = contract.pages[i]?.content;
-      if (pageContent && typeof pageContent === 'string' && 
-          pageContent.toLowerCase().includes(searchText.toLowerCase())) {
-        return i + 1;
-      }
-    }
-    return 1;
-  }
-
-  private calculatePosition(contract: ContractDocument, searchText: string): {
-    x: number; y: number; width: number; height: number;
-  } {
-    // Add validation to prevent undefined/null errors
-    if (!contract?.pages || !searchText || typeof searchText !== 'string') {
-      return { x: 0, y: 0, width: 100, height: 20 };
-    }
-    
-    // Find the page containing the text
-    for (const page of contract.pages) {
-      if (!page?.textItems || !Array.isArray(page.textItems)) {
-        continue;
-      }
-      
-      const textItems = page.textItems.filter(item => 
-        item?.str && typeof item.str === 'string' && 
-        item.str.toLowerCase().includes(searchText.toLowerCase())
-      );
-      
-      if (textItems.length > 0) {
-        const firstItem = textItems[0];
-        return {
-          x: firstItem.transform?.[4] || 0,
-          y: firstItem.transform?.[5] || 0,
-          width: firstItem.width || 100,
-          height: firstItem.height || 20
-        };
-      }
-    }
-    
-    // Default position if not found
-    return { x: 0, y: 0, width: 100, height: 20 };
-  }
-
-  // Quick analysis for immediate feedback
-  async getQuickInsights(content: string): Promise<string[]> {
-    try {
-      const completion = await groq.chat.completions.create({
-        messages: [{
-          role: 'user',
-          content: `Geben Sie 3-5 schnelle Einschätzungen zu diesem deutschen Vertragstext:
-          
-${content.substring(0, 1000)}...
-
-Antworten Sie mit kurzen Stichpunkten über potentielle Rechtsprobleme.`
-        }],
-        model: 'moonshotai/kimi-k2-instruct',
-        temperature: 0.2,
-        max_tokens: 300,
-      });
-
-      const response = completion.choices[0]?.message?.content;
-      return response ? response.split('\n').filter(line => line.trim()) : [];
-    } catch (error) {
-      console.error('Quick insights error:', error);
-      return ['Schnellanalyse nicht verfügbar'];
-    }
   }
 } 
